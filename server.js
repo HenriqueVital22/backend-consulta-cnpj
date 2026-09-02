@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 // ======================================================
 
 const MAX_CNPJS_POR_LOTE = 50;
-const INTERVALO_ENTRE_CONSULTAS = 1000;
+const INTERVALO_ENTRE_CONSULTAS = 15000;
 
 // Chave da CNPJá cadastrada no Render
 const CNPJA_API_KEY = process.env.CNPJA_API_KEY;
