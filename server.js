@@ -66,6 +66,7 @@ async function consultarCNPJA(cnpj) {
         resultado: "LIMITE API",
         codigo: 429
       };
+
     }
 
 
@@ -79,6 +80,7 @@ async function consultarCNPJA(cnpj) {
         resultado: "ERRO API: " + status,
         codigo: status
       };
+
     }
 
 
@@ -88,6 +90,19 @@ async function consultarCNPJA(cnpj) {
 
     const dados =
       await resposta.json();
+
+
+    // ==================================================
+    // DATA DE ABERTURA
+    // ==================================================
+
+    const dataAbertura =
+      dados.founded || null;
+
+
+    console.log(
+      `CNPJ ${cnpj} - Data abertura: ${dataAbertura}`
+    );
 
 
     // ==================================================
@@ -103,25 +118,43 @@ async function consultarCNPJA(cnpj) {
         dados.company.simples.optant;
 
 
+      // ==================================================
+      // OPTANTE
+      // ==================================================
+
       if (optante === true) {
 
         return {
-          resultado: "OPTANTE"
+          resultado: "OPTANTE",
+          dataAbertura: dataAbertura
         };
+
       }
 
+
+      // ==================================================
+      // NÃO OPTANTE
+      // ==================================================
 
       if (optante === false) {
 
         return {
-          resultado: "NÃO OPTANTE"
+          resultado: "NÃO OPTANTE",
+          dataAbertura: dataAbertura
         };
+
       }
+
     }
 
 
+    // ==================================================
+    // NÃO IDENTIFICADO
+    // ==================================================
+
     return {
-      resultado: "NÃO IDENTIFICADO"
+      resultado: "NÃO IDENTIFICADO",
+      dataAbertura: dataAbertura
     };
 
 
@@ -137,7 +170,71 @@ async function consultarCNPJA(cnpj) {
       resultado: "ERRO",
       detalhe: erro.message
     };
+
   }
+
+}
+
+
+// ======================================================
+// CALCULA SE CNPJ É NOVO
+// ======================================================
+
+function cnpjTemAte60Dias(dataAbertura) {
+
+  if (!dataAbertura) {
+
+    return false;
+
+  }
+
+
+  const data =
+    new Date(dataAbertura);
+
+
+  if (
+    isNaN(
+      data.getTime()
+    )
+  ) {
+
+    return false;
+
+  }
+
+
+  const hoje =
+    new Date();
+
+
+  // Remove horário para comparação correta
+  hoje.setHours(0, 0, 0, 0);
+  data.setHours(0, 0, 0, 0);
+
+
+  const diferenca =
+    hoje.getTime() -
+    data.getTime();
+
+
+  const dias =
+    Math.floor(
+      diferenca /
+      (1000 * 60 * 60 * 24)
+    );
+
+
+  console.log(
+    `Data abertura: ${dataAbertura} - Idade: ${dias} dias`
+  );
+
+
+  return (
+    dias >= 0 &&
+    dias <= 60
+  );
+
 }
 
 
@@ -154,7 +251,7 @@ app.post("/consultar", async (req, res) => {
 
 
     // ==================================================
-    // VERIFICA SE RECEBEU CNPJ
+    // VERIFICA SE ENVIOU CNPJ
     // ==================================================
 
     if (!cnpjRecebido) {
@@ -165,7 +262,9 @@ app.post("/consultar", async (req, res) => {
 
         erro:
           "Envie um CNPJ."
+
       });
+
     }
 
 
@@ -178,7 +277,7 @@ app.post("/consultar", async (req, res) => {
 
 
     // ==================================================
-    // VALIDA TAMANHO
+    // VERIFICA TAMANHO
     // ==================================================
 
     if (cnpj.length !== 14) {
@@ -190,8 +289,13 @@ app.post("/consultar", async (req, res) => {
         cnpj: cnpj,
 
         resultado:
-          "CNPJ INVÁLIDO"
+          "CNPJ INVÁLIDO",
+
+        dataAbertura:
+          null
+
       });
+
     }
 
 
@@ -204,7 +308,49 @@ app.post("/consultar", async (req, res) => {
 
 
     // ==================================================
-    // RETORNA RESULTADO
+    // RESULTADO DA CONSULTA
+    // ==================================================
+
+    let resultadoFinal =
+      resultado.resultado;
+
+
+    // ==================================================
+    // REGRA DOS 60 DIAS
+    //
+    // Se:
+    // NÃO OPTANTE
+    // +
+    // CNPJ aberto há até 60 dias
+    //
+    // Resultado:
+    // VERIFICAR
+    // ==================================================
+
+    if (
+      resultado.resultado === "NÃO OPTANTE" &&
+      cnpjTemAte60Dias(
+        resultado.dataAbertura
+      )
+    ) {
+
+      resultadoFinal =
+        "VERIFICAR";
+
+
+      console.log(
+        `CNPJ ${cnpj} é novo e retornou NÃO OPTANTE.`
+      );
+
+      console.log(
+        `Resultado alterado para VERIFICAR.`
+      );
+
+    }
+
+
+    // ==================================================
+    // RETORNA PARA O GOOGLE SHEETS
     // ==================================================
 
     return res.json({
@@ -214,17 +360,23 @@ app.post("/consultar", async (req, res) => {
       cnpj: cnpj,
 
       resultado:
-        resultado.resultado,
+        resultadoFinal,
 
-      codigo:
-        resultado.codigo || null
+      dataAbertura:
+        resultado.dataAbertura || null,
+
+      resultadoAPI:
+        resultado.resultado
 
     });
 
 
   } catch (erro) {
 
-    console.error(erro);
+    console.error(
+      "Erro na rota /consultar:",
+      erro
+    );
 
 
     return res.status(500).json({
@@ -233,7 +385,9 @@ app.post("/consultar", async (req, res) => {
 
       erro:
         erro.message
+
     });
+
   }
 
 });
@@ -257,6 +411,9 @@ app.get("/", (req, res) => {
 
     intervalo:
       "Controlado pelo Google Sheets",
+
+    regra:
+      "CNPJ novo até 60 dias + NÃO OPTANTE = VERIFICAR",
 
     apiConfigurada:
       !!CNPJA_API_KEY
