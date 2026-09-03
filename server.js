@@ -6,31 +6,19 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// ======================================================
-// CONFIGURAÇÕES
-// ======================================================
-
-const MAX_CNPJS_POR_LOTE = 50;
-const INTERVALO_ENTRE_CONSULTAS = 15000;
-
-// Chave da CNPJá cadastrada no Render
 const CNPJA_API_KEY = process.env.CNPJA_API_KEY;
 
-// ======================================================
-// FUNÇÃO PARA AGUARDAR
-// ======================================================
-
-function esperar(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 // ======================================================
 // LIMPA CNPJ
 // ======================================================
 
 function limparCNPJ(cnpj) {
-  return String(cnpj || "").replace(/\D/g, "");
+
+  return String(cnpj || "")
+    .replace(/\D/g, "");
 }
+
 
 // ======================================================
 // CONSULTA CNPJá
@@ -45,38 +33,66 @@ async function consultarCNPJA(cnpj) {
 
   try {
 
-    const resposta = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Authorization": "Bearer " + CNPJA_API_KEY
-      }
-    });
+    const resposta =
+      await fetch(
+        url,
+        {
+          method: "GET",
 
-    const status = resposta.status;
+          headers: {
+            "Authorization":
+              "Bearer " + CNPJA_API_KEY
+          }
+        }
+      );
+
+
+    const status =
+      resposta.status;
+
 
     console.log(
       `CNPJ ${cnpj} - Status API: ${status}`
     );
 
+
+    // ==================================================
+    // LIMITE DA API
+    // ==================================================
+
     if (status === 429) {
 
       return {
-        cnpj: cnpj,
         resultado: "LIMITE API",
         codigo: 429
       };
     }
 
+
+    // ==================================================
+    // OUTROS ERROS
+    // ==================================================
+
     if (status !== 200) {
 
       return {
-        cnpj: cnpj,
         resultado: "ERRO API: " + status,
         codigo: status
       };
     }
 
-    const dados = await resposta.json();
+
+    // ==================================================
+    // CONVERTE RESPOSTA
+    // ==================================================
+
+    const dados =
+      await resposta.json();
+
+
+    // ==================================================
+    // VERIFICA SIMPLES NACIONAL
+    // ==================================================
 
     if (
       dados.company &&
@@ -86,27 +102,28 @@ async function consultarCNPJA(cnpj) {
       const optante =
         dados.company.simples.optant;
 
+
       if (optante === true) {
 
         return {
-          cnpj: cnpj,
           resultado: "OPTANTE"
         };
       }
 
+
       if (optante === false) {
 
         return {
-          cnpj: cnpj,
           resultado: "NÃO OPTANTE"
         };
       }
     }
 
+
     return {
-      cnpj: cnpj,
       resultado: "NÃO IDENTIFICADO"
     };
+
 
   } catch (erro) {
 
@@ -115,94 +132,112 @@ async function consultarCNPJA(cnpj) {
       erro.message
     );
 
+
     return {
-      cnpj: cnpj,
       resultado: "ERRO",
       detalhe: erro.message
     };
   }
 }
 
+
 // ======================================================
-// ROTA PRINCIPAL
+// ROTA PARA CONSULTAR 1 CNPJ
 // ======================================================
 
 app.post("/consultar", async (req, res) => {
 
   try {
 
-    const lista = req.body.cnpjs;
+    const cnpjRecebido =
+      req.body.cnpj;
 
-    if (!Array.isArray(lista)) {
+
+    // ==================================================
+    // VERIFICA SE RECEBEU CNPJ
+    // ==================================================
+
+    if (!cnpjRecebido) {
 
       return res.status(400).json({
+
         sucesso: false,
-        erro: "Envie os CNPJs em um array chamado cnpjs."
+
+        erro:
+          "Envie um CNPJ."
       });
     }
 
-    if (lista.length > MAX_CNPJS_POR_LOTE) {
 
-      return res.status(400).json({
-        sucesso: false,
-        erro: "O limite é de 50 CNPJs por lote."
+    // ==================================================
+    // LIMPA CNPJ
+    // ==================================================
+
+    const cnpj =
+      limparCNPJ(cnpjRecebido);
+
+
+    // ==================================================
+    // VALIDA TAMANHO
+    // ==================================================
+
+    if (cnpj.length !== 14) {
+
+      return res.json({
+
+        sucesso: true,
+
+        cnpj: cnpj,
+
+        resultado:
+          "CNPJ INVÁLIDO"
       });
     }
 
-    const cnpjs = lista
-      .map(limparCNPJ)
-      .filter(cnpj => cnpj !== "");
 
-    const resultados = [];
+    // ==================================================
+    // CONSULTA CNPJá
+    // ==================================================
 
-    for (let i = 0; i < cnpjs.length; i++) {
+    const resultado =
+      await consultarCNPJA(cnpj);
 
-      const cnpj = cnpjs[i];
 
-      console.log(
-        `Consultando ${i + 1}/${cnpjs.length}: ${cnpj}`
-      );
-
-      if (cnpj.length !== 14) {
-
-        resultados.push({
-          cnpj: cnpj,
-          resultado: "CNPJ INVÁLIDO"
-        });
-
-      } else {
-
-        const resultado =
-          await consultarCNPJA(cnpj);
-
-        resultados.push(resultado);
-      }
-
-      if (i < cnpjs.length - 1) {
-
-        await esperar(
-          INTERVALO_ENTRE_CONSULTAS
-        );
-      }
-    }
+    // ==================================================
+    // RETORNA RESULTADO
+    // ==================================================
 
     return res.json({
+
       sucesso: true,
-      quantidade: resultados.length,
-      resultados: resultados
+
+      cnpj: cnpj,
+
+      resultado:
+        resultado.resultado,
+
+      codigo:
+        resultado.codigo || null
+
     });
+
 
   } catch (erro) {
 
     console.error(erro);
 
+
     return res.status(500).json({
+
       sucesso: false,
-      erro: erro.message
+
+      erro:
+        erro.message
     });
   }
 
 });
+
 
 // ======================================================
 // TESTE DO SERVIDOR
@@ -211,23 +246,38 @@ app.post("/consultar", async (req, res) => {
 app.get("/", (req, res) => {
 
   res.json({
+
     status: "online",
-    sistema: "Backend Consulta CNPJ",
-    limitePorLote: MAX_CNPJS_POR_LOTE,
-    intervaloEntreConsultas: "1 segundo",
-    apiConfigurada: !!CNPJA_API_KEY
+
+    sistema:
+      "Backend Consulta CNPJ",
+
+    modo:
+      "1 CNPJ por consulta",
+
+    intervalo:
+      "Controlado pelo Google Sheets",
+
+    apiConfigurada:
+      !!CNPJA_API_KEY
+
   });
 
 });
+
 
 // ======================================================
 // INICIA SERVIDOR
 // ======================================================
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
 
-  console.log(
-    `Servidor rodando na porta ${PORT}`
-  );
+    console.log(
+      `Servidor rodando na porta ${PORT}`
+    );
 
-});
+  }
+);
